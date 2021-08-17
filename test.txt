@@ -11,4 +11,4 @@ function fib(x) {
 	}
 }
 
-print('fib 5 is: ', fib(5));
+#print('fib 5 is: ', fib(5));

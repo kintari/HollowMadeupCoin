@@ -1,1 +1,1 @@
-run = "make clean main && ./main"
+run = "clear; make clean build && build/bin/x86_64-linux-gnu/main"
