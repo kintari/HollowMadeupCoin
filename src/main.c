@@ -23,9 +23,18 @@
 
 #define countof(x) (sizeof(x)/(sizeof((x)[0])))
 
+#define NOT_IMPLEMENTED() \
+	do { \
+		TRACE("ERROR: Not implemented: '%s'\n", __FUNCTION__); \
+		abort(); \
+	} while (0)
 
+
+#ifdef VERBOSE_TRACE
+#define OP_TRACE TRACE
+#else
 #define OP_TRACE(...)
-
+#endif
 
 void swap_i32(int32_t *px, int32_t *py) {
 	int32_t y = *py;
@@ -97,12 +106,13 @@ typedef struct buf_t {
 typedef struct function_t {
 	uint32_t name;
 	uint8_t *body;
+	uint32_t len;
 } function_t;
 
 typedef struct module_t {
 	str **strings;
 	size_t num_strings;
-	function_t *functions;
+	function_t **functions;
 	size_t num_functions;
 } module_t;
 
@@ -154,14 +164,6 @@ int32_t vm_pop(vm_t *vm) {
 VM_FETCH_IMPL(uint8_t, vm_fetch_u8);
 VM_FETCH_IMPL(uint32_t, vm_fetch_u32);
 VM_FETCH_IMPL(int32_t, vm_fetch_i32);
-
-
-
-#define NotImplemented() \
-	do { \
-		TRACE("ERROR: Not implemented: '%s'\n", __FUNCTION__); \
-		abort(); \
-	} while (0)
 
 
 bool op_nop(vm_t *vm) {
@@ -268,20 +270,10 @@ void vm_eval(vm_t *vm) {
 	OP_TRACE("<<< vm_eval\n");
 }
 
-bool take(token_t *token) {
-	if (ch == -1) return false;
-	str *tmp = token->text;
-	token->text = str_append(token->text, (uchar_t) ch);
-	free(tmp);
-	next_char();
-	return true;
-}
-
 bool run_program(vm_t *vm) {
 	vm->regs.pc = 0;
 	vm->regs.sp = 0;
 	vm->regs.fl = 0;
-	//TRACE("ch = '%c'\n", ch);
 	vm_push(vm, ch);
 	vm_eval(vm);
 	return vm_pop(vm) != 0;
@@ -295,6 +287,12 @@ void print_str(const str *s, FILE *f) {
 			fputc(ch, f);
 	}
 }
+
+static uint8_t is_not_newline[] = {
+	push, '\n', 0, 0, 0,
+	neq,
+	halt
+};
 
 static uint8_t is_space[] = {
 	dup,
@@ -312,8 +310,35 @@ static uint8_t is_space[] = {
 	halt
 };
 
+static uint8_t is_alpha_numeric[] = {
+	dup,
+	dup,
+	push, 'a', 0, 0, 0,
+	gte,
+	xchg,
+	push, 'z', 0, 0, 0,
+	lte,
+	and,
+	xchg,
+	push, '_', 0, 0, 0,
+	eq,
+	or,
+	halt
+};
+
+bool take(token_t *token) {
+	if (ch == -1) return false;
+	str *tmp = token->text;
+	token->text = str_append(token->text, (uchar_t) ch);
+	free(tmp);
+	next_char();
+	return true;
+}
+
 int take_while(const buf_t *bytecode, token_t *token) {
+#if 0
 	TRACE(">>> take_while\n");
+#endif
 	token->text = str_new(0);
 	vm_t vm;
 	vm_init(&vm);
@@ -324,46 +349,12 @@ int take_while(const buf_t *bytecode, token_t *token) {
 		token->text = text;
 		next_char();
 	}
+#if 0
 	TRACE("<<< take_while: ");
 	print_str(token->text, stdout);
 	TRACE("\n");
+#endif
 	return str_num_chars(token->text);
-}
-
-void scan_comment() {
-	static uint8_t code[] = {
-		push, '\n', 0, 0, 0,
-		neq,
-		halt
-	};
-	token_t token;
-	buf_t buf = (buf_t){ code, sizeof(code) };
-	take_while(&buf, &token);
-	fputs("skipped over comment '", stdout);
-	print_str(token.text, stdout);
-	fputs("'\n", stdout);
-}
-
-bool scan_word(token_t *token) {
-	uint8_t code[] = {
-		dup,
-		dup,
-		push, 'a', 0, 0, 0,
-		gte,
-		xchg,
-		push, 'z', 0, 0, 0,
-		lte,
-		and,
-		xchg,
-		push, '_', 0, 0, 0,
-		eq,
-		or,
-		halt
-	};
-	buf_t is_alpha = { .ptr=code, .len=sizeof(code) };
-	bool b = take_while(&is_alpha, token) > 0;
-	token->type = str_new("word");
-	return b;
 }
 
 bool scan(token_t *token) {
@@ -371,14 +362,16 @@ bool scan(token_t *token) {
 		token->text = str_new(0);
 		token->type = NULL;
 		if (ch == '#') {
-			scan_comment();
+			take_while(&(buf_t){ is_not_newline, sizeof(is_not_newline) }, token);
 		}
 		else if (isspace(ch)) {
-			buf_t buf = (buf_t){ is_space, sizeof(is_space) };
-			take_while(&buf, token);
+			take_while(&(buf_t){ is_space, sizeof(is_space) }, token);
 		}
 		else if (isalpha(ch) || ch == '_') {
-			return scan_word(token);
+			if (take_while(&(buf_t){ is_alpha_numeric, sizeof(is_alpha_numeric) }, token) > 0) {
+				token->type = str_new("word");
+				return true;
+			}
 		}
 		else {
 			bool b = take(token);
@@ -400,8 +393,6 @@ void print_token(const token_t *token, FILE *f) {
 	fputs("' }\n", stdout);
 }
 
-#define TEST_ASSERT assert
-
 int32_t call_function(vm_t *vm, uint8_t *body, size_t len, int32_t *params, size_t num_params) {
 	buf_t buf = (buf_t) { body, len };
 	vm->bytecode = &buf;
@@ -411,30 +402,46 @@ int32_t call_function(vm_t *vm, uint8_t *body, size_t len, int32_t *params, size
 	return vm_pop(vm);
 }
 
+#define TEST_ASSERT assert
+
 void run_tests() {
 	for (size_t i = 0; i < 255; i++) {
 		vm_t vm;
 		vm_init(&vm);
-		int b = call_function(&vm, is_space, sizeof(is_space), (int32_t[]) { i }, 1);
+		int got_a_space = call_function(&vm, is_space, sizeof(is_space), (int32_t[]) { i }, 1);
+#if 0
 		printf("is_space(%ld) -> %d\n", i, b);
 		fflush(stdout);
-		if (b) {
-			if (i != ' ' && i != '\t' && i != '\n') {
-				assert(false);
-			}
-		}
-		else {
-			if (i == ' ' || i == '\t' || i == '\n') {
-				assert(false);
-			}
-		}
+#endif
+		TEST_ASSERT(got_a_space == (i == ' ' || i == '\t' || i == '\n'));
 	}
+}
+
+function_t *function_new(uint32_t name, uint8_t *body, uint32_t len) {
+	function_t *f = malloc(sizeof(function_t));
+	*f = (function_t){ .name=name, .body=body, .len=len };
+	return f;
+}
+
+void init_module(module_t *module) {
+	module->num_strings = 4;
+	module->strings = calloc(module->num_strings, sizeof(str *));
+	module->strings[1] = str_new("is_not_newline");
+	module->strings[2] = str_new("is_space");
+	module->strings[3] = str_new("is_alpha_numeric");
+	module->num_functions = 4;
+	module->functions = calloc(module->num_functions, sizeof(function_t *));
+	module->functions[1] = function_new(1, is_not_newline, sizeof(is_not_newline));
+	module->functions[2] = function_new(2, is_space, sizeof(is_space));
+	module->functions[3] = function_new(3, is_alpha_numeric, sizeof(is_alpha_numeric));
 }
 
 int main(int argc, char *argv[]) {
 	run_tests();
 	file = fopen("test.txt", "rb");
 	if (file) {
+		module_t *module = malloc(sizeof(module_t));
+		init_module(module);
 		next_char();
 		token_t token;
 		while (scan(&token)) {

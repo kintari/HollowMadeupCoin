@@ -6,7 +6,7 @@ SOURCES:=$(wildcard src/*.c)
 OBJECTS:=$(patsubst src/%.c,$(BINDIR)/$(ARCH)/%.o,$(SOURCES))
 
 CC=gcc
-CFLAGS=-g -Wall -Werror -Wno-unused-function -O0 -fPIC -DDEBUG
+CFLAGS=-g -Wall -Werror -Wno-unused-function -Wno-unused-variable -O0 -fPIC -DDEBUG
 
 build: $(TARGET)
 
