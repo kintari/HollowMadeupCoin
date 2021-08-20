@@ -436,8 +436,43 @@ void init_module(module_t *module) {
 	module->functions[3] = function_new(3, is_alpha_numeric, sizeof(is_alpha_numeric));
 }
 
+typedef struct {
+	str *text, *type;
+} lexeme_t;
+
+lexeme_t *lexemes;
+int num_lexemes;
+
+void load_lexemes() {
+	FILE *f = fopen("lexemes.txt", "rb");
+	assert(f);
+	num_lexemes = 0;
+	char text[256], type[256];
+	while (!feof(f) && fscanf(f, "%s %s\n", text, type) == 2) {
+		num_lexemes++;
+	}
+	lexemes = calloc(num_lexemes, sizeof(lexeme_t));
+	fseek(f, 0, SEEK_SET);
+	int i = 0;
+	while (!feof(f) && fscanf(f, "%s %s\n", text, type) == 2) {
+		lexemes[i].text = str_new(text);
+		lexemes[i].type = str_new(type);
+		i++;
+	}
+	printf("%d lexemes\n", num_lexemes);
+	for (int j = 0; j < num_lexemes; j++) {
+		print_str(lexemes[j].text, stdout);
+		fputs(" = ", stdout);
+		print_str(lexemes[j].type, stdout);
+		fputc('\n', stdout);
+	}
+	fclose(f);
+}
+
 int main(int argc, char *argv[]) {
 	run_tests();
+	load_lexemes();
+return 0;
 	file = fopen("test.txt", "rb");
 	if (file) {
 		module_t *module = malloc(sizeof(module_t));
